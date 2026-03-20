@@ -71,3 +71,8 @@ body {
 .card-shadow-lg {
   box-shadow: 0 4px 12px var(--color-warm-shadow);
 }
+
+/* iPhone safe area padding for bottom nav */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
