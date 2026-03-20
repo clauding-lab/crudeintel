@@ -26,7 +26,8 @@ export function usePrices() {
 
         if (!prices?.length) return
 
-        const byName = (name: string) => prices.find((p) => p.commodity === name)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const byName = (name: string) => prices.find((p: any) => p.commodity === name)
         const brent = byName('brent')
         const urals = byName('urals')
         const hh = byName('henry_hub')
@@ -119,7 +120,7 @@ export function useNews() {
 
         setData({
           updated_at: items[0].fetched_at,
-          items: items.map((n) => ({
+          items: items.map((n: any) => ({
             id: n.id,
             title: n.title,
             source: n.source,
@@ -231,7 +232,7 @@ export function useFundamentals() {
               : mockFundamentals.eia_inventories.current_week,
             five_year_avg_mb: latestInv ? Number(latestInv.five_year_avg_mb || 440.5) : 440.5,
             history_12w: inventories
-              ? inventories.map((r) => Number(r.value_mb)).reverse()
+              ? inventories.map((r: any) => Number(r.value_mb)).reverse()
               : mockFundamentals.eia_inventories.history_12w,
           },
           baker_hughes_rig_count: {
@@ -239,7 +240,7 @@ export function useFundamentals() {
             oil_rigs: latestRig ? Number(latestRig.oil_rigs) : mockFundamentals.baker_hughes_rig_count.oil_rigs,
             change: latestRig ? Number(latestRig.change) : mockFundamentals.baker_hughes_rig_count.change,
             history_26w: rigs
-              ? rigs.map((r) => Number(r.oil_rigs)).reverse()
+              ? rigs.map((r: any) => Number(r.oil_rigs)).reverse()
               : mockFundamentals.baker_hughes_rig_count.history_26w,
           },
           opec_compliance: {
@@ -250,7 +251,7 @@ export function useFundamentals() {
               ? (opec[0].source as string)
               : mockFundamentals.opec_compliance.source,
             members: opec?.length
-              ? opec.map((m) => ({
+              ? opec.map((m: any) => ({
                   country: m.country as string,
                   quota_mbd: Number(m.quota_mbd),
                   estimated_mbd: Number(m.estimated_mbd),
@@ -262,14 +263,14 @@ export function useFundamentals() {
             date: (latestRef?.report_date as string) || mockFundamentals.refinery_utilization.date,
             value_pct: latestRef ? Number(latestRef.value_pct) : mockFundamentals.refinery_utilization.value_pct,
             history_12w: refinery
-              ? refinery.map((r) => Number(r.value_pct)).reverse()
+              ? refinery.map((r: any) => Number(r.value_pct)).reverse()
               : mockFundamentals.refinery_utilization.history_12w,
           },
           us_production: {
             date: (latestProd?.report_date as string) || mockFundamentals.us_production.date,
             value_mbd: latestProd ? Number(latestProd.value_mbd) : mockFundamentals.us_production.value_mbd,
             history_26w: production
-              ? production.map((r) => Number(r.value_mbd)).reverse()
+              ? production.map((r: any) => Number(r.value_mbd)).reverse()
               : mockFundamentals.us_production.history_26w,
           },
         })
@@ -307,7 +308,7 @@ export function useChartData(commodity: string = 'brent') {
         setData({
           commodity,
           interval: 'daily',
-          data: history.map((h) => ({
+          data: history.map((h: any) => ({
             date: h.date,
             open: Number(h.open),
             high: Number(h.high),
