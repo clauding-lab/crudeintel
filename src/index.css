@@ -72,6 +72,12 @@ body {
   box-shadow: 0 4px 12px var(--color-warm-shadow);
 }
 
+/* Hide TradingView lightweight-charts watermark */
+[class*="apply-common-tooltip"] a,
+[class*="chart-container"] a[href*="tradingview"] {
+  display: none !important;
+}
+
 /* iPhone safe area padding for bottom nav */
 .safe-area-bottom {
   padding-bottom: env(safe-area-inset-bottom, 0px);

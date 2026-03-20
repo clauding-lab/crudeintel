@@ -99,6 +99,7 @@ function buildChart(
     },
     rightPriceScale: { borderColor: isDark ? '#44403c' : '#e7e5e4' },
     timeScale: { borderColor: isDark ? '#44403c' : '#e7e5e4', timeVisible: false },
+    watermark: { visible: false },
   })
 
   const days = getTimeRangeDays(timeRange)
