@@ -1,7 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="6" fill="#faf8f5"/>
-  <g transform="translate(6,4)">
-    <path d="M10 2C10 2 6 8 6 14C6 18 8 22 10 22C12 22 14 18 14 14C14 8 10 2 10 2Z" fill="#b45309" opacity="0.9"/>
-    <path d="M10 6C10 6 8 10 8 14C8 16.5 9 19 10 19C11 19 12 16.5 12 14C12 10 10 6 10 6Z" fill="#f59e0b" opacity="0.6"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#1c1917"/>
+  <defs>
+    <mask id="largeMask">
+      <rect width="512" height="512" fill="white"/>
+      <path d="M185 100 C185 100 120 185 120 245 C120 282 148 312 185 312 C222 312 250 282 250 245 C250 185 185 100 185 100Z"
+            fill="black" stroke="black" stroke-width="36"/>
+    </mask>
+  </defs>
+  <path d="M280 60 C280 60 172 200 172 310 C172 370 220 420 280 420 C340 420 388 370 388 310 C388 200 280 60 280 60Z"
+        fill="none" stroke="#d97706" stroke-width="28" stroke-linejoin="round" mask="url(#largeMask)"/>
+  <path d="M185 100 C185 100 120 185 120 245 C120 282 148 312 185 312 C222 312 250 282 250 245 C250 185 185 100 185 100Z"
+        fill="none" stroke="#d97706" stroke-width="24" stroke-linejoin="round"/>
 </svg>

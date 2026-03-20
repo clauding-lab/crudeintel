@@ -4,8 +4,8 @@
   "description": "The energy briefing. Crude oil, LNG prices, and AI-powered energy intelligence.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#faf8f5",
-  "theme_color": "#b45309",
+  "background_color": "#1c1917",
+  "theme_color": "#d97706",
   "icons": [
     {
       "src": "icon-192.png",
