@@ -1,0 +1,26 @@
+name: "Pipeline: Fundamentals"
+
+on:
+  schedule:
+    # Wed & Fri at 16:00 UTC (after EIA reports)
+    - cron: "0 16 * * 3,5"
+  workflow_dispatch:
+
+jobs:
+  fetch-fundamentals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npx tsx pipeline/run.ts fundamentals
+
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      EIA_API_KEY: ${{ secrets.EIA_API_KEY }}

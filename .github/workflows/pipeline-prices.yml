@@ -1,0 +1,26 @@
+name: "Pipeline: Prices"
+
+on:
+  schedule:
+    # Every 30 min, Mon-Fri, 06:00-22:00 UTC
+    - cron: "*/30 6-22 * * 1-5"
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  fetch-prices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npx tsx pipeline/run.ts prices
+
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
