@@ -28,7 +28,7 @@ interface TabBarProps {
 export function TabBar({ activeTab, onTabChange }: TabBarProps) {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 bg-warm-card/95 backdrop-blur-md border-t border-warm-border safe-area-bottom">
-      <div className="max-w-lg mx-auto flex justify-center">
+      <div className="max-w-sm mx-auto flex justify-center">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id
           const Icon = tab.icon
@@ -38,7 +38,7 @@ export function TabBar({ activeTab, onTabChange }: TabBarProps) {
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
               className={cn(
-                'flex-1 flex flex-col items-center gap-0.5 py-3 pt-3 relative transition-colors duration-200',
+                'flex-1 flex flex-col items-center gap-0.5 py-2 pt-2 relative transition-colors duration-200',
                 isActive ? 'text-crude-amber' : 'text-warm-text-secondary hover:text-warm-text'
               )}
             >
