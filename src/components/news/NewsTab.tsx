@@ -17,7 +17,7 @@ const categoryFilters: { id: NewsCategory; label: string }[] = [
 
 interface NewsTabProps {
   news: NewsFeed
-  brief: EnergyBrief
+  brief: EnergyBrief | null
   onNavigateToBrief: () => void
 }
 
@@ -36,33 +36,35 @@ export function NewsTab({ news, brief, onNavigateToBrief }: NewsTabProps) {
       exit={{ opacity: 0 }}
     >
       {/* Energy Desk Read hero card */}
-      <motion.div
-        className="bg-warm-card rounded-xl p-5 card-shadow border-l-[3px] border-crude-amber cursor-pointer hover:card-shadow-lg transition-shadow"
-        onClick={onNavigateToBrief}
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        whileHover={{ y: -2 }}
-      >
-        <div className="flex items-center gap-2 mb-2">
-          <BookOpen size={16} className="text-crude-amber" />
-          <span className="text-[10px] font-medium text-crude-amber uppercase tracking-widest">
-            Energy Desk Read
-          </span>
-        </div>
-        <h3 className="font-serif text-lg font-semibold text-warm-text mb-2 leading-snug">
-          {brief.headline}
-        </h3>
-        <p className="text-sm text-warm-text-secondary line-clamp-3 leading-relaxed">
-          {brief.sections.market_recap.split('\n')[0]}
-        </p>
-        <div className="flex items-center justify-between mt-3 pt-3 border-t border-warm-border-light">
-          <p className="text-[10px] text-warm-text-secondary italic">
-            Curated by {brief.branding.author} · {brief.branding.ai_disclosure}
+      {brief && (
+        <motion.div
+          className="bg-warm-card rounded-xl p-5 card-shadow border-l-[3px] border-crude-amber cursor-pointer hover:card-shadow-lg transition-shadow"
+          onClick={onNavigateToBrief}
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          whileHover={{ y: -2 }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <BookOpen size={16} className="text-crude-amber" />
+            <span className="text-[10px] font-medium text-crude-amber uppercase tracking-widest">
+              Energy Desk Read
+            </span>
+          </div>
+          <h3 className="font-serif text-lg font-semibold text-warm-text mb-2 leading-snug">
+            {brief.headline}
+          </h3>
+          <p className="text-sm text-warm-text-secondary line-clamp-3 leading-relaxed">
+            {brief.sections.market_recap.split('\n')[0]}
           </p>
-          <span className="text-xs text-crude-amber font-medium">Read →</span>
-        </div>
-      </motion.div>
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-warm-border-light">
+            <p className="text-[10px] text-warm-text-secondary italic">
+              Curated by {brief.branding.author} · {brief.branding.ai_disclosure}
+            </p>
+            <span className="text-xs text-crude-amber font-medium">Read →</span>
+          </div>
+        </motion.div>
+      )}
 
       {/* Category filter chips */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">

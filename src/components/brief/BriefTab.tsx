@@ -4,10 +4,19 @@ import { formatDate, formatTimestamp } from '@/lib/utils'
 import type { EnergyBrief } from '@/types/data'
 
 interface BriefTabProps {
-  brief: EnergyBrief
+  brief: EnergyBrief | null
 }
 
 export function BriefTab({ brief }: BriefTabProps) {
+  if (!brief) return (
+    <div className="flex items-center justify-center py-32">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-2 border-crude-amber border-t-transparent rounded-full animate-spin" />
+        <span className="text-warm-muted text-sm">Loading brief…</span>
+      </div>
+    </div>
+  )
+
   const { sections, branding } = brief
 
   return (

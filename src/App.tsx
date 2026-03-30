@@ -26,13 +26,26 @@ function App() {
   const navigateToNews = useCallback(() => handleTabChange('news'), [handleTabChange])
   const navigateToBrief = useCallback(() => handleTabChange('brief'), [handleTabChange])
 
+  const loading = !prices || !news
+
   const renderTab = () => {
+    if (loading && activeTab !== 'settings') {
+      return (
+        <div className="flex items-center justify-center py-32">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-2 border-crude-amber border-t-transparent rounded-full animate-spin" />
+            <span className="text-warm-muted text-sm">Loading market data…</span>
+          </div>
+        </div>
+      )
+    }
+
     switch (activeTab) {
       case 'dashboard':
         return (
           <DashboardTab
-            prices={prices}
-            news={news}
+            prices={prices!}
+            news={news!}
             onNavigateToNews={navigateToNews}
           />
         )
@@ -41,7 +54,7 @@ function App() {
       case 'news':
         return (
           <NewsTab
-            news={news}
+            news={news!}
             brief={brief}
             onNavigateToBrief={navigateToBrief}
           />
@@ -55,7 +68,7 @@ function App() {
           <SettingsTab
             isDark={isDark}
             onToggleTheme={toggleTheme}
-            lastUpdated={prices.updated_at}
+            lastUpdated={prices?.updated_at || ''}
           />
         )
     }

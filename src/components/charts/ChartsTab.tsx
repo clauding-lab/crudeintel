@@ -158,7 +158,7 @@ export function ChartsTab() {
 
   useEffect(() => {
     const container = chartContainerRef.current
-    if (!container || loading || !chartData.data.length) return
+    if (!container || loading || !chartData?.data.length) return
 
     // Destroy any previous chart
     destroyChart()

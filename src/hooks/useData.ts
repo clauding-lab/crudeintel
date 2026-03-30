@@ -6,11 +6,11 @@ import { supabase } from '@/lib/supabase'
 // ─── Supabase-powered hooks (with mock fallback) ────────────
 
 export function usePrices() {
-  const [data, setData] = useState<PricesLatest>(mockPrices)
+  const [data, setData] = useState<PricesLatest | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!supabase) { setLoading(false); return }
+    if (!supabase) { setData(mockPrices); setLoading(false); return }
 
     async function fetch() {
       try {
@@ -80,6 +80,7 @@ export function usePrices() {
         })
       } catch (err) {
         console.warn('[usePrices] Supabase query failed, using mock data:', err)
+        setData(mockPrices)
       } finally {
         setLoading(false)
       }
@@ -102,11 +103,11 @@ export function usePrices() {
 }
 
 export function useNews() {
-  const [data, setData] = useState<NewsFeed>(mockNews)
+  const [data, setData] = useState<NewsFeed | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!supabase) { setLoading(false); return }
+    if (!supabase) { setData(mockNews); setLoading(false); return }
 
     async function fetch() {
       try {
@@ -133,6 +134,7 @@ export function useNews() {
         })
       } catch (err) {
         console.warn('[useNews] Supabase query failed, using mock data:', err)
+        setData(mockNews)
       } finally {
         setLoading(false)
       }
@@ -145,11 +147,11 @@ export function useNews() {
 }
 
 export function useBrief() {
-  const [data, setData] = useState<EnergyBrief>(mockBrief)
+  const [data, setData] = useState<EnergyBrief | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!supabase) { setLoading(false); return }
+    if (!supabase) { setData(mockBrief); setLoading(false); return }
 
     async function fetch() {
       try {
@@ -181,6 +183,7 @@ export function useBrief() {
         })
       } catch (err) {
         console.warn('[useBrief] Supabase query failed, using mock data:', err)
+        setData(mockBrief)
       } finally {
         setLoading(false)
       }
@@ -193,11 +196,11 @@ export function useBrief() {
 }
 
 export function useFundamentals() {
-  const [data, setData] = useState<Fundamentals>(mockFundamentals)
+  const [data, setData] = useState<Fundamentals | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!supabase) { setLoading(false); return }
+    if (!supabase) { setData(mockFundamentals); setLoading(false); return }
 
     async function fetch() {
       try {
@@ -276,6 +279,7 @@ export function useFundamentals() {
         })
       } catch (err) {
         console.warn('[useFundamentals] Supabase query failed, using mock data:', err)
+        setData(mockFundamentals)
       } finally {
         setLoading(false)
       }
@@ -288,11 +292,11 @@ export function useFundamentals() {
 }
 
 export function useChartData(commodity: string = 'brent') {
-  const [data, setData] = useState<PriceHistory>(mockBrentHistory)
+  const [data, setData] = useState<PriceHistory | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!supabase) { setLoading(false); return }
+    if (!supabase) { setData(mockBrentHistory); setLoading(false); return }
 
     async function fetch() {
       try {
@@ -319,6 +323,7 @@ export function useChartData(commodity: string = 'brent') {
         })
       } catch (err) {
         console.warn('[useChartData] Supabase query failed, using mock data:', err)
+        setData(mockBrentHistory)
       } finally {
         setLoading(false)
       }

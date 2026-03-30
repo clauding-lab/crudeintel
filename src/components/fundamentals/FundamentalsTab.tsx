@@ -5,7 +5,7 @@ import { cn, formatTimestamp } from '@/lib/utils'
 import type { Fundamentals } from '@/types/data'
 
 interface FundamentalsTabProps {
-  data: Fundamentals
+  data: Fundamentals | null
 }
 
 // Fundamentals use standard convention: green = good, red = bad
@@ -23,6 +23,15 @@ function complianceBg(pct: number): string {
 }
 
 export function FundamentalsTab({ data }: FundamentalsTabProps) {
+  if (!data) return (
+    <div className="flex items-center justify-center py-32">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-2 border-crude-amber border-t-transparent rounded-full animate-spin" />
+        <span className="text-warm-muted text-sm">Loading fundamentals…</span>
+      </div>
+    </div>
+  )
+
   const { eia_inventories, baker_hughes_rig_count, opec_compliance, refinery_utilization, us_production } = data
 
   return (
