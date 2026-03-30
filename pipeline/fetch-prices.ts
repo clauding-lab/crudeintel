@@ -1,10 +1,11 @@
 /**
- * Pipeline: Fetch commodity prices from multiple free APIs
+ * Pipeline: Fetch commodity prices from multiple free sources
  *
  * Sources:
- *   - Yahoo Finance (no key) → Brent (BZ=F), Henry Hub (NG=F), TTF (TTF=F), JKM LNG (JKM=F)
- *   - Twelve Data API (free tier) → USD/RUB
- *   - Derived → Urals (Brent minus discount), OPEC Basket
+ *   - Trading Economics (scrape, no key) → Brent, WTI, Henry Hub, TTF, JKM, Urals, USD/RUB
+ *   - Yahoo Finance (fallback for live quotes + historical OHLCV for charts)
+ *   - Twelve Data (fallback for USD/RUB only)
+ *   - Derived → Urals India CIF, OPEC Basket
  *
  * Schedule: Every 30 min during market hours (Mon-Fri 06:00-22:00 UTC)
  */
@@ -16,6 +17,128 @@ const TWELVE_DATA_BASE = 'https://api.twelvedata.com'
 
 // Rate limit helper
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+// ─── Trading Economics (scrape, no API key) ───────────────────
+
+const TE_BASE = 'https://tradingeconomics.com'
+
+// User agents to rotate through
+const USER_AGENTS = [
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+]
+
+interface TECommodityConfig {
+  slug: string          // TE page path (e.g. '/commodity/brent-crude-oil')
+  commodity: string     // Internal name (e.g. 'brent')
+  currency: string
+  unit: string
+  minPrice: number      // Sanity check bounds
+  maxPrice: number
+}
+
+const TE_COMMODITIES: TECommodityConfig[] = [
+  { slug: '/commodity/brent-crude-oil', commodity: 'brent', currency: 'USD', unit: 'bbl', minPrice: 20, maxPrice: 250 },
+  { slug: '/commodity/crude-oil', commodity: 'wti', currency: 'USD', unit: 'bbl', minPrice: 20, maxPrice: 250 },
+  { slug: '/commodity/natural-gas', commodity: 'henry_hub', currency: 'USD', unit: 'MMBtu', minPrice: 0.5, maxPrice: 30 },
+  { slug: '/commodity/eu-natural-gas', commodity: 'ttf', currency: 'EUR', unit: 'MWh', minPrice: 5, maxPrice: 500 },
+  { slug: '/commodity/lng', commodity: 'jkm', currency: 'USD', unit: 'MMBtu', minPrice: 1, maxPrice: 100 },
+  { slug: '/commodity/urals-oil', commodity: 'urals', currency: 'USD', unit: 'bbl', minPrice: 15, maxPrice: 250 },
+]
+
+const TE_USDRUB_SLUG = '/russia/currency'
+
+interface TEPriceResult {
+  price: number
+  symbol: string
+  name: string
+  source: 'trading_economics'
+}
+
+async function fetchTEPrice(slug: string, minPrice: number, maxPrice: number): Promise<TEPriceResult | null> {
+  try {
+    const ua = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]
+    const res = await fetch(`${TE_BASE}${slug}`, {
+      headers: {
+        'User-Agent': ua,
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const html = await res.text()
+
+    // Extract price from JSON-LD "last" or "value" field embedded in page
+    const lastMatch = html.match(/"last"\s*:\s*([\d.]+)/)
+    const valueMatch = html.match(/"value"\s*:\s*([\d.]+)/)
+    const priceStr = lastMatch?.[1] || valueMatch?.[1]
+    if (!priceStr) throw new Error('No price data found in page')
+
+    const price = Number(priceStr)
+    if (isNaN(price) || price < minPrice || price > maxPrice) {
+      throw new Error(`Price ${price} outside bounds [${minPrice}, ${maxPrice}]`)
+    }
+
+    // Extract symbol from TESymbol variable
+    const symbolMatch = html.match(/TESymbol\s*=\s*'([^']+)'/)
+    // Extract name from page title or description
+    const nameMatch = html.match(/<title>([^<]+)<\/title>/)
+    const name = nameMatch?.[1]?.split(' - ')[0]?.trim() || ''
+
+    return {
+      price: Number(price.toFixed(4)),
+      symbol: symbolMatch?.[1] || '',
+      name,
+      source: 'trading_economics',
+    }
+  } catch (err) {
+    console.error(`  [te] Failed to fetch ${slug}:`, err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+async function fetchTEExchangeRate(slug: string): Promise<{ rate: number; source: string } | null> {
+  try {
+    const ua = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]
+    const res = await fetch(`${TE_BASE}${slug}`, {
+      headers: {
+        'User-Agent': ua,
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const html = await res.text()
+
+    // Extract rate from JSON-LD "last" or "value" field
+    const lastMatch = html.match(/"last"\s*:\s*([\d.]+)/)
+    const valueMatch = html.match(/"value"\s*:\s*([\d.]+)/)
+    const rateStr = lastMatch?.[1] || valueMatch?.[1]
+    if (!rateStr) throw new Error('No rate data found in page')
+
+    const rate = Number(rateStr)
+    if (isNaN(rate) || rate < 10 || rate > 500) {
+      throw new Error(`Rate ${rate} outside reasonable bounds`)
+    }
+
+    return { rate: Number(rate.toFixed(4)), source: 'trading_economics' }
+  } catch (err) {
+    console.error(`  [te] Failed to fetch FX ${slug}:`, err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+// Yahoo symbol mapping for fallback
+const YAHOO_FALLBACK: Record<string, string> = {
+  brent: 'BZ=F',
+  wti: 'CL=F',
+  henry_hub: 'NG=F',
+  ttf: 'TTF=F',
+  jkm: 'JKM=F',
+}
 
 // ─── Twelve Data (free tier) ───────────────────────────────
 
@@ -208,207 +331,130 @@ export async function run() {
   const runId = await logPipelineStart('prices')
   const errors: string[] = []
 
+  // Track fetched prices for derived commodities
+  const livePrices: Record<string, { price: number; change: number; change_pct: number; source: string }> = {}
+
   try {
-    // ── Step 1: Fetch from Yahoo Finance chart API (Brent + TTF) ──
-    console.log('  Fetching Brent from Yahoo Finance...')
-    const brentYahoo = await fetchYahooQuoteViaChart('BZ=F')
+    // ── Step 1: Fetch current prices from Trading Economics (primary) ──
+    console.log('  [Step 1] Fetching current prices from Trading Economics...')
+    for (const cfg of TE_COMMODITIES) {
+      console.log(`  Fetching ${cfg.commodity} from Trading Economics...`)
+      const te = await fetchTEPrice(cfg.slug, cfg.minPrice, cfg.maxPrice)
 
-    console.log('  Fetching TTF from Yahoo Finance...')
-    const ttfYahoo = await fetchYahooQuoteViaChart('TTF=F')
-
-    if (brentYahoo) {
-      const brentSparkline = await fetchYahooHistory('BZ=F', 7)
-      const sparkline5d = brentSparkline.slice(-5).map((h) => h.close)
-
-      const { error } = await supabaseAdmin.from('prices').upsert({
-        commodity: 'brent',
-        price: Number(brentYahoo.regularMarketPrice.toFixed(2)),
-        change: Number(brentYahoo.regularMarketChange.toFixed(2)),
-        change_pct: Number(brentYahoo.regularMarketChangePercent.toFixed(2)),
-        currency: 'USD',
-        unit: 'bbl',
-        source: 'yahoo_finance',
-        sparkline_5d: sparkline5d,
-      }, { onConflict: 'commodity' })
-      if (error) errors.push(`brent: ${error.message}`)
-      else console.log(`  ✓ Brent: $${brentYahoo.regularMarketPrice.toFixed(2)}`)
-    } else {
-      errors.push('No Brent quote from Yahoo')
-    }
-
-    if (ttfYahoo) {
-      const ttfSparklineHistory = await fetchYahooHistory('TTF=F', 7)
-      const ttfSparkline5d = ttfSparklineHistory.slice(-5).map((h) => h.close)
-
-      const { error } = await supabaseAdmin.from('prices').upsert({
-        commodity: 'ttf',
-        price: Number(ttfYahoo.regularMarketPrice.toFixed(2)),
-        change: Number(ttfYahoo.regularMarketChange.toFixed(2)),
-        change_pct: Number(ttfYahoo.regularMarketChangePercent.toFixed(2)),
-        currency: 'EUR',
-        unit: 'MWh',
-        source: 'yahoo_finance',
-        sparkline_5d: ttfSparkline5d,
-      }, { onConflict: 'commodity' })
-      if (error) errors.push(`ttf: ${error.message}`)
-      else console.log(`  ✓ TTF: €${ttfYahoo.regularMarketPrice.toFixed(2)}`)
-    } else {
-      console.warn('  ⚠ TTF not available on Yahoo — keeping existing data')
-    }
-
-    // ── Step 1b: JKM LNG from Yahoo Finance ──
-    console.log('  Fetching JKM LNG from Yahoo Finance...')
-    const jkmYahoo = await fetchYahooQuoteViaChart('JKM=F')
-
-    if (jkmYahoo) {
-      const jkmSparklineHistory = await fetchYahooHistory('JKM=F', 7)
-      const jkmSparkline5d = jkmSparklineHistory.slice(-5).map((h) => h.close)
-
-      const { error } = await supabaseAdmin.from('prices').upsert({
-        commodity: 'jkm',
-        price: Number(jkmYahoo.regularMarketPrice.toFixed(3)),
-        change: Number(jkmYahoo.regularMarketChange.toFixed(3)),
-        change_pct: Number(jkmYahoo.regularMarketChangePercent.toFixed(2)),
-        currency: 'USD',
-        unit: 'MMBtu',
-        source: 'yahoo_finance',
-        sparkline_5d: jkmSparkline5d,
-      }, { onConflict: 'commodity' })
-      if (error) errors.push(`jkm: ${error.message}`)
-      else console.log(`  ✓ JKM LNG: $${jkmYahoo.regularMarketPrice.toFixed(3)}`)
-    } else {
-      // JKM may not have regularMarketPrice — try history fallback
-      console.log('  ⚠ JKM live quote unavailable, trying history fallback...')
-      const jkmHistory = await fetchYahooHistory('JKM=F', 10)
-      if (jkmHistory.length) {
-        const latest = jkmHistory[jkmHistory.length - 1]
-        const prev = jkmHistory.length > 1 ? jkmHistory[jkmHistory.length - 2] : latest
-        const change = Number((latest.close - prev.close).toFixed(3))
-        const changePct = prev.close > 0 ? Number(((change / prev.close) * 100).toFixed(2)) : 0
-        const { error } = await supabaseAdmin.from('prices').upsert({
-          commodity: 'jkm',
-          price: latest.close,
-          change,
-          change_pct: changePct,
-          currency: 'USD',
-          unit: 'MMBtu',
-          source: 'yahoo_finance',
-          sparkline_5d: jkmHistory.slice(-5).map((h) => h.close),
-        }, { onConflict: 'commodity' })
-        if (error) errors.push(`jkm: ${error.message}`)
-        else console.log(`  ✓ JKM LNG (from history): $${latest.close}`)
+      if (te) {
+        livePrices[cfg.commodity] = { price: te.price, change: 0, change_pct: 0, source: 'trading_economics' }
+        console.log(`  ✓ ${cfg.commodity} (TE): ${cfg.currency === 'EUR' ? '€' : '$'}${te.price}`)
       } else {
-        console.warn('  ⚠ JKM LNG not available')
+        // Fallback to Yahoo Finance live quote
+        const yahooSymbol = YAHOO_FALLBACK[cfg.commodity]
+        if (yahooSymbol) {
+          console.log(`  ⚠ TE failed for ${cfg.commodity}, trying Yahoo Finance (${yahooSymbol})...`)
+          const yahoo = await fetchYahooQuoteViaChart(yahooSymbol)
+          if (yahoo) {
+            livePrices[cfg.commodity] = {
+              price: Number(yahoo.regularMarketPrice.toFixed(4)),
+              change: Number(yahoo.regularMarketChange.toFixed(4)),
+              change_pct: Number(yahoo.regularMarketChangePercent.toFixed(2)),
+              source: 'yahoo_finance',
+            }
+            console.log(`  ✓ ${cfg.commodity} (Yahoo fallback): ${cfg.currency === 'EUR' ? '€' : '$'}${yahoo.regularMarketPrice.toFixed(2)}`)
+          } else {
+            errors.push(`No quote for ${cfg.commodity} from TE or Yahoo`)
+          }
+        } else if (cfg.commodity === 'urals') {
+          // Urals has its own fallback chain handled below
+          console.log(`  ⚠ TE failed for Urals — will try FT Markets / derived fallback`)
+        }
       }
+
+      // Rate limit between TE requests
+      await delay(2000)
     }
 
-    // ── Step 2: Fetch WTI + Henry Hub from Yahoo Finance ──
-    console.log('  Fetching WTI from Yahoo Finance...')
-    const wtiYahoo = await fetchYahooQuoteViaChart('CL=F')
-
-    if (wtiYahoo) {
-      const wtiSparklineHistory = await fetchYahooHistory('CL=F', 7)
-      const wtiSparkline5d = wtiSparklineHistory.slice(-5).map((h) => h.close)
-
-      const { error } = await supabaseAdmin.from('prices').upsert({
-        commodity: 'wti',
-        price: Number(wtiYahoo.regularMarketPrice.toFixed(2)),
-        change: Number(wtiYahoo.regularMarketChange.toFixed(2)),
-        change_pct: Number(wtiYahoo.regularMarketChangePercent.toFixed(2)),
-        currency: 'USD',
-        unit: 'bbl',
-        source: 'yahoo_finance',
-        sparkline_5d: wtiSparkline5d,
-      }, { onConflict: 'commodity' })
-      if (error) errors.push(`wti: ${error.message}`)
-      else console.log(`  ✓ WTI: $${wtiYahoo.regularMarketPrice.toFixed(2)}`)
-    } else {
-      errors.push('No WTI quote from Yahoo Finance')
-    }
-
-    console.log('  Fetching Henry Hub from Yahoo Finance...')
-    const ngYahoo = await fetchYahooQuoteViaChart('NG=F')
-
-    if (ngYahoo) {
-      const ngSparklineHistory = await fetchYahooHistory('NG=F', 7)
-      const ngSparkline5d = ngSparklineHistory.slice(-5).map((h) => h.close)
-
-      const { error } = await supabaseAdmin.from('prices').upsert({
-        commodity: 'henry_hub',
-        price: Number(ngYahoo.regularMarketPrice.toFixed(3)),
-        change: Number(ngYahoo.regularMarketChange.toFixed(3)),
-        change_pct: Number(ngYahoo.regularMarketChangePercent.toFixed(2)),
-        currency: 'USD',
-        unit: 'MMBtu',
-        source: 'yahoo_finance',
-        sparkline_5d: ngSparkline5d,
-      }, { onConflict: 'commodity' })
-      if (error) errors.push(`henry_hub: ${error.message}`)
-      else console.log(`  ✓ Henry Hub: $${ngYahoo.regularMarketPrice.toFixed(3)}`)
-    } else {
-      errors.push('No Henry Hub quote from Yahoo Finance')
-    }
-
-    // ── Step 3: USD/RUB exchange rate ──
-    console.log('  Fetching USD/RUB from Twelve Data...')
-    const fxQuote = await fetchTwelveDataQuote('USD/RUB')
-    if (fxQuote) {
+    // ── Step 2: USD/RUB exchange rate (TE primary, Twelve Data fallback) ──
+    console.log('  Fetching USD/RUB from Trading Economics...')
+    const teFx = await fetchTEExchangeRate(TE_USDRUB_SLUG)
+    if (teFx) {
       await supabaseAdmin.from('exchange_rates').upsert({
         pair: 'USD/RUB',
-        rate: parseFloat(fxQuote.close),
-        change_pct: parseFloat(fxQuote.percent_change),
+        rate: teFx.rate,
+        change_pct: 0,
       }, { onConflict: 'pair' })
-      console.log(`  ✓ USD/RUB: ${fxQuote.close}`)
+      console.log(`  ✓ USD/RUB (TE): ${teFx.rate}`)
+    } else if (TWELVE_DATA_KEY) {
+      console.log('  ⚠ TE failed for USD/RUB, trying Twelve Data fallback...')
+      const fxQuote = await fetchTwelveDataQuote('USD/RUB')
+      if (fxQuote) {
+        await supabaseAdmin.from('exchange_rates').upsert({
+          pair: 'USD/RUB',
+          rate: parseFloat(fxQuote.close),
+          change_pct: parseFloat(fxQuote.percent_change),
+        }, { onConflict: 'pair' })
+        console.log(`  ✓ USD/RUB (Twelve Data fallback): ${fxQuote.close}`)
+      }
     }
 
-    // ── Step 4: Urals — try real price, fall back to Brent-based derivation ──
+    // ── Step 3: Urals fallback chain (if TE didn't get it) ──
     let uralsDiscount = URALS_FALLBACK_DISCOUNT
-    if (brentYahoo) {
-      console.log('  Fetching Urals price...')
-      const realUrals = await fetchUralsPrice()
-      const brentSparkline5d = (await fetchYahooHistory('BZ=F', 7)).slice(-5).map((h) => h.close)
+    const brentLive = livePrices['brent']
 
-      if (realUrals) {
-        // Use real Urals price and calculate actual discount
-        uralsDiscount = Number((brentYahoo.regularMarketPrice - realUrals.price).toFixed(2))
-        console.log(`  ✓ Urals (live): $${realUrals.price} — discount from Brent: $${uralsDiscount}`)
-        const { error } = await supabaseAdmin.from('prices').upsert({
-          commodity: 'urals',
-          price: realUrals.price,
-          change: Number(brentYahoo.regularMarketChange.toFixed(2)),
-          change_pct: Number(brentYahoo.regularMarketChangePercent.toFixed(2)),
-          currency: 'USD',
-          unit: 'bbl',
-          source: realUrals.source,
-          sparkline_5d: brentSparkline5d.map((p) => Number((p - uralsDiscount).toFixed(2))),
-          discount_from_brent: uralsDiscount,
-          discount_source: 'live',
-          discount_updated: new Date().toISOString().split('T')[0],
-        }, { onConflict: 'commodity' })
-        if (error) errors.push(`urals: ${error.message}`)
+    if (!livePrices['urals'] && brentLive) {
+      // Fallback 1: FT Markets
+      console.log('  Trying FT Markets for Urals...')
+      const ftUrals = await fetchUralsPrice()
+      if (ftUrals) {
+        livePrices['urals'] = { price: ftUrals.price, change: 0, change_pct: 0, source: ftUrals.source }
+        console.log(`  ✓ Urals (FT Markets): $${ftUrals.price}`)
       } else {
-        // Fall back to derived
-        const urals = deriveUrals(
-          brentYahoo.regularMarketPrice,
-          brentYahoo.regularMarketChange,
-          brentYahoo.regularMarketChangePercent,
-          brentSparkline5d,
-          uralsDiscount,
-        )
-        const { error } = await supabaseAdmin.from('prices').upsert(urals, { onConflict: 'commodity' })
-        if (error) errors.push(`urals: ${error.message}`)
-        else console.log(`  ✓ Urals (derived, $${uralsDiscount} discount): $${urals.price}`)
+        // Fallback 2: Derive from Brent
+        const discount = calcUralsDAPDiscount(brentLive.price)
+        const derivedPrice = Number((brentLive.price - discount).toFixed(2))
+        livePrices['urals'] = { price: derivedPrice, change: brentLive.change, change_pct: brentLive.change_pct, source: 'derived' }
+        console.log(`  ✓ Urals (derived, $${discount.toFixed(2)} discount): $${derivedPrice}`)
       }
+    }
+
+    // Calculate Urals discount from Brent (for history derivation)
+    if (livePrices['urals'] && brentLive) {
+      uralsDiscount = Number((brentLive.price - livePrices['urals'].price).toFixed(2))
+    }
+
+    // ── Step 4: Upsert all current prices to Supabase ──
+    console.log('  [Step 4] Upserting current prices to Supabase...')
+    for (const cfg of TE_COMMODITIES) {
+      const live = livePrices[cfg.commodity]
+      if (!live) continue
+
+      const upsertData: Record<string, unknown> = {
+        commodity: cfg.commodity,
+        price: live.price,
+        change: live.change,
+        change_pct: live.change_pct,
+        currency: cfg.currency,
+        unit: cfg.unit,
+        source: live.source,
+        sparkline_5d: [], // Will be updated from history below
+      }
+
+      // Add Urals-specific fields
+      if (cfg.commodity === 'urals' && brentLive) {
+        upsertData.discount_from_brent = uralsDiscount
+        upsertData.discount_source = live.source === 'trading_economics' ? 'live' : (live.source === 'derived' ? 'calculated' : 'live')
+        upsertData.discount_updated = new Date().toISOString().split('T')[0]
+      }
+
+      const { error } = await supabaseAdmin.from('prices').upsert(upsertData, { onConflict: 'commodity' })
+      if (error) errors.push(`${cfg.commodity}: ${error.message}`)
     }
 
     // ── Step 5: OPEC Basket (derived from Brent) ──
-    if (brentYahoo) {
-      const opecPrice = Number((brentYahoo.regularMarketPrice - 2.3).toFixed(2))
+    if (brentLive) {
+      const opecPrice = Number((brentLive.price - 2.3).toFixed(2))
       await supabaseAdmin.from('prices').upsert({
         commodity: 'opec_basket',
         price: opecPrice,
         change: 0,
-        change_pct: Number(brentYahoo.regularMarketChangePercent.toFixed(2)),
+        change_pct: brentLive.change_pct,
         currency: 'USD',
         unit: 'bbl',
         source: 'derived',
@@ -417,29 +463,61 @@ export async function run() {
       console.log(`  ✓ OPEC Basket (derived): $${opecPrice}`)
     }
 
-    // (Step 6 — spreads table — moved after Step 7f so we can use computed history)
+    // ── Step 6: Price history for ALL commodities (Yahoo Finance) ──
+    console.log('  [Step 6] Fetching price history from Yahoo Finance...')
 
-    // ── Step 7: Price history for ALL commodities ──
+    // History config: commodity → { yahoo symbol, days }
+    const historyConfig: Array<{ commodity: string; symbol: string; days: number }> = [
+      { commodity: 'brent', symbol: 'BZ=F', days: 365 },
+      { commodity: 'wti', symbol: 'CL=F', days: 365 },
+      { commodity: 'henry_hub', symbol: 'NG=F', days: 253 },
+      { commodity: 'ttf', symbol: 'TTF=F', days: 90 },
+      { commodity: 'jkm', symbol: 'JKM=F', days: 365 },
+    ]
 
-    // 7a. Brent (Yahoo Finance)
-    console.log('  Fetching Brent price history...')
-    const brentHistory = await fetchYahooHistory('BZ=F', 365)
-    if (brentHistory.length) {
-      const rows = brentHistory.map((h) => ({ commodity: 'brent', ...h }))
-      const { error } = await supabaseAdmin
-        .from('price_history')
-        .upsert(rows, { onConflict: 'commodity,date' })
-      if (error) errors.push(`price_history brent: ${error.message}`)
-      else console.log(`  ✓ Brent history: ${brentHistory.length} days`)
+    const histories: Record<string, Array<{ date: string; open: number; high: number; low: number; close: number; volume: number | null }>> = {}
 
-      // Update sparkline from history (live price already set in Step 1)
-      if (brentYahoo) {
+    for (const cfg of historyConfig) {
+      console.log(`  Fetching ${cfg.commodity} price history...`)
+      const history = await fetchYahooHistory(cfg.symbol, cfg.days)
+      if (history.length) {
+        histories[cfg.commodity] = history
+        const rows = history.map((h) => ({ commodity: cfg.commodity, ...h }))
+        const { error } = await supabaseAdmin
+          .from('price_history')
+          .upsert(rows, { onConflict: 'commodity,date' })
+        if (error) errors.push(`price_history ${cfg.commodity}: ${error.message}`)
+        else console.log(`  ✓ ${cfg.commodity} history: ${history.length} days`)
+
+        // Update sparkline from history
         await supabaseAdmin.from('prices').update({
-          sparkline_5d: brentHistory.slice(-5).map((h) => h.close),
-        }).eq('commodity', 'brent')
-      }
+          sparkline_5d: history.slice(-5).map((h) => h.close),
+        }).eq('commodity', cfg.commodity)
 
-      // 7b. Urals (derived from Brent — dynamic discount)
+        // For JKM: also update price from history if no live quote succeeded
+        if (cfg.commodity === 'jkm' && !livePrices['jkm']) {
+          const latest = history[history.length - 1]
+          const prev = history.length > 1 ? history[history.length - 2] : latest
+          const change = Number((latest.close - prev.close).toFixed(3))
+          const changePct = prev.close > 0 ? Number(((change / prev.close) * 100).toFixed(2)) : 0
+          await supabaseAdmin.from('prices').upsert({
+            commodity: 'jkm',
+            price: latest.close,
+            change,
+            change_pct: changePct,
+            currency: 'USD',
+            unit: 'MMBtu',
+            source: 'yahoo_finance',
+            sparkline_5d: history.slice(-5).map((h) => h.close),
+          }, { onConflict: 'commodity' })
+          console.log(`  ✓ JKM price updated from history: $${latest.close}`)
+        }
+      }
+    }
+
+    // 6b. Urals history (derived from Brent history)
+    const brentHistory = histories['brent']
+    if (brentHistory?.length) {
       const uralsHistory = brentHistory.map((h) => ({
         commodity: 'urals',
         date: h.date,
@@ -449,119 +527,44 @@ export async function run() {
         close: Number((h.close - uralsDiscount).toFixed(2)),
         volume: h.volume,
       }))
-      const { error: ue } = await supabaseAdmin
+      const { error } = await supabaseAdmin
         .from('price_history')
         .upsert(uralsHistory, { onConflict: 'commodity,date' })
-      if (ue) errors.push(`price_history urals: ${ue.message}`)
-      else console.log(`  ✓ Urals history: ${uralsHistory.length} days (derived)`)
-    }
+      if (error) errors.push(`price_history urals: ${error.message}`)
+      else console.log(`  ✓ Urals history: ${uralsHistory.length} days (derived from Brent)`)
 
-    // 7c. Henry Hub / Natural Gas (Yahoo Finance)
-    console.log('  Fetching Henry Hub price history...')
-    const ngHistory = await fetchYahooHistory('NG=F', 253)
-    if (ngHistory.length) {
-      const rows = ngHistory.map((h) => ({ commodity: 'henry_hub', ...h }))
-      const { error } = await supabaseAdmin
-        .from('price_history')
-        .upsert(rows, { onConflict: 'commodity,date' })
-      if (error) errors.push(`price_history henry_hub: ${error.message}`)
-      else console.log(`  ✓ Henry Hub history: ${ngHistory.length} days`)
+      // Update Urals sparkline
+      await supabaseAdmin.from('prices').update({
+        sparkline_5d: uralsHistory.slice(-5).map((h) => h.close),
+      }).eq('commodity', 'urals')
 
-      // Update sparkline from history (live price already set in Step 2)
-      if (ngYahoo) {
-        await supabaseAdmin.from('prices').update({
-          sparkline_5d: ngHistory.slice(-5).map((h) => h.close),
-        }).eq('commodity', 'henry_hub')
-      }
-    }
-
-    // 7d. WTI (Yahoo Finance)
-    console.log('  Fetching WTI price history...')
-    const wtiHistory = await fetchYahooHistory('CL=F', 365)
-    if (wtiHistory.length) {
-      const rows = wtiHistory.map((h) => ({ commodity: 'wti', ...h }))
-      const { error } = await supabaseAdmin
-        .from('price_history')
-        .upsert(rows, { onConflict: 'commodity,date' })
-      if (error) errors.push(`price_history wti: ${error.message}`)
-      else console.log(`  ✓ WTI history: ${wtiHistory.length} days`)
-    }
-
-    // 7e. TTF (Yahoo Finance)
-    console.log('  Fetching TTF price history...')
-    const ttfHistory = await fetchYahooHistory('TTF=F', 90)
-    if (ttfHistory.length) {
-      const rows = ttfHistory.map((h) => ({ commodity: 'ttf', ...h }))
-      const { error } = await supabaseAdmin
-        .from('price_history')
-        .upsert(rows, { onConflict: 'commodity,date' })
-      if (error) errors.push(`price_history ttf: ${error.message}`)
-      else console.log(`  ✓ TTF history: ${ttfHistory.length} days`)
-    }
-
-    // 7f. JKM LNG (Yahoo Finance)
-    console.log('  Fetching JKM LNG price history...')
-    const jkmHistory = await fetchYahooHistory('JKM=F', 365)
-    if (jkmHistory.length) {
-      const rows = jkmHistory.map((h) => ({ commodity: 'jkm', ...h }))
-      const { error } = await supabaseAdmin
-        .from('price_history')
-        .upsert(rows, { onConflict: 'commodity,date' })
-      if (error) errors.push(`price_history jkm: ${error.message}`)
-      else console.log(`  ✓ JKM LNG history: ${jkmHistory.length} days`)
-
-      // Update sparkline + price from history (JKM live quote often unavailable)
-      const latestJKM = jkmHistory[jkmHistory.length - 1]
-      if (latestJKM) {
-        const prevJKM = jkmHistory.length > 1 ? jkmHistory[jkmHistory.length - 2] : latestJKM
-        const jkmChange = Number((latestJKM.close - prevJKM.close).toFixed(3))
-        const jkmChangePct = prevJKM.close > 0 ? Number(((jkmChange / prevJKM.close) * 100).toFixed(2)) : 0
-        await supabaseAdmin.from('prices').upsert({
-          commodity: 'jkm',
-          price: latestJKM.close,
-          change: jkmChange,
-          change_pct: jkmChangePct,
-          currency: 'USD',
-          unit: 'MMBtu',
-          source: 'yahoo_finance',
-          sparkline_5d: jkmHistory.slice(-5).map((h) => h.close),
-        }, { onConflict: 'commodity' })
-      }
-    }
-
-    // 7g. Urals India CIF history (Urals FOB + freight)
-    if (brentHistory.length) {
-      const uralsIndiaHistory = brentHistory.map((h) => {
-        const uralsFOB = h.close - uralsDiscount
-        const indiaCIF = Number((uralsFOB + URALS_INDIA_FREIGHT).toFixed(2))
-        return {
-          commodity: 'urals_india',
-          date: h.date,
-          open: Number((h.open - uralsDiscount + URALS_INDIA_FREIGHT).toFixed(2)),
-          high: Number((h.high - uralsDiscount + URALS_INDIA_FREIGHT).toFixed(2)),
-          low: Number((h.low - uralsDiscount + URALS_INDIA_FREIGHT).toFixed(2)),
-          close: indiaCIF,
-          volume: null,
-        }
-      })
-      const { error } = await supabaseAdmin
+      // 6c. Urals India CIF history (Urals FOB + freight)
+      const uralsIndiaHistory = brentHistory.map((h) => ({
+        commodity: 'urals_india',
+        date: h.date,
+        open: Number((h.open - uralsDiscount + URALS_INDIA_FREIGHT).toFixed(2)),
+        high: Number((h.high - uralsDiscount + URALS_INDIA_FREIGHT).toFixed(2)),
+        low: Number((h.low - uralsDiscount + URALS_INDIA_FREIGHT).toFixed(2)),
+        close: Number((h.close - uralsDiscount + URALS_INDIA_FREIGHT).toFixed(2)),
+        volume: null,
+      }))
+      const { error: uie } = await supabaseAdmin
         .from('price_history')
         .upsert(uralsIndiaHistory, { onConflict: 'commodity,date' })
-      if (error) errors.push(`price_history urals_india: ${error.message}`)
+      if (uie) errors.push(`price_history urals_india: ${uie.message}`)
       else console.log(`  ✓ Urals India history: ${uralsIndiaHistory.length} days (derived)`)
 
-      // ── Upsert Urals India into prices table ──
+      // Upsert Urals India current price
       const latestIndiaPrice = uralsIndiaHistory[uralsIndiaHistory.length - 1].close
-      const sparkline = uralsIndiaHistory.slice(-5).map((h) => h.close)
       await supabaseAdmin.from('prices').upsert({
         commodity: 'urals_india',
         price: latestIndiaPrice,
-        change: Number((brentYahoo?.regularMarketChange || 0).toFixed(2)),
-        change_pct: Number((brentYahoo?.regularMarketChangePercent || 0).toFixed(2)),
+        change: livePrices['urals']?.change || 0,
+        change_pct: livePrices['urals']?.change_pct || 0,
         currency: 'USD',
         unit: 'bbl',
         source: 'derived',
-        sparkline_5d: sparkline,
+        sparkline_5d: uralsIndiaHistory.slice(-5).map((h) => h.close),
       }, { onConflict: 'commodity' })
       console.log(`  ✓ Urals India CIF: $${latestIndiaPrice}`)
     }
